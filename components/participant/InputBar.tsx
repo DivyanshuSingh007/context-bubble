@@ -8,8 +8,6 @@ import { DocumentPreview } from "./DocumentPreview";
 
 interface Props {
   bubbleId: string;
-  userId?: string;
-  userName?: string;
   isAnonymous: boolean;
   onToggleAnonymous?: () => void;
   onSubmit: (text: string, attachments?: Attachment[]) => void;
@@ -44,8 +42,6 @@ function formatBytes(bytes: number): string {
 
 export function InputBar({
   bubbleId,
-  userId = "dev-user-1",
-  userName = "Participant",
   isAnonymous,
   onToggleAnonymous,
   onSubmit,
@@ -175,7 +171,7 @@ export function InputBar({
       setIsRecording(true);
       setLiveTranscript("Listening...");
 
-      const session = new LiveAudioSession(bubbleId, userId, userName, {
+      const session = new LiveAudioSession(bubbleId, {
         onPartial: (partial) => setLiveTranscript(partial),
         onFinal: (finalText) => {
           if (finalText) setText((prev) => (prev ? `${prev} ${finalText}` : finalText));

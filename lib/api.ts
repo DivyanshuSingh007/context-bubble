@@ -2,7 +2,6 @@
 
 import { getCurrentIdToken } from "@/lib/auth";
 import type {
-  Bubble,
   BubbleMember,
   KnowledgeGraph,
   PopState,
@@ -558,8 +557,8 @@ export interface SSECallbacks {
   onGraph?: (graph: KnowledgeGraph) => void;
   onPresence?: (presence: { user_id: string; display_name: string; is_typing: boolean; status: string }) => void;
   onPopState?: (state: PopState, receiptId?: string, popReason?: string, retentionPolicy?: string, message?: string, expiryDecisionDeadline?: string) => void;
-  onMessage?: (message: any) => void;
-  onMemberJoined?: (member: any) => void;
+  onMessage?: (message: Record<string, unknown>) => void;
+  onMemberJoined?: (member: BubbleMember) => void;
   onMemberLeft?: (payload: { user_id: string; display_name: string }) => void;
   onMemberRemoved?: (payload: { user_id: string; removed_by_host?: boolean }) => void;
   onAnonymousModeUpdated?: (payload: { enabled: boolean }) => void;
@@ -568,166 +567,92 @@ export interface SSECallbacks {
 
 /**
  * Connects to the backend Server-Sent Events stream (/bubbles/{bubble_id}/stream).
+ * EventSource cannot send headers, so the ID token travels as a query parameter.
  * Returns an unsubscribe teardown function.
  */
 export function subscribeToBubbleStream(
   bubbleId: string,
   callbacks: SSECallbacks
 ): () => void {
-  const url = `${BACKEND_URL}/api/v1/bubbles/${bubbleId}/stream`;
-  const eventSource = new EventSource(url);
+  let eventSource: EventSource | null = null;
+  let closed = false;
+  let retryTimer: number | undefined;
 
-  eventSource.addEventListener("connected", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onConnected?.(data);
-    } catch {
-      // Ignored
-    }
-  });
+  const connect = async () => {
+    const token = await getCurrentIdToken().catch(() => null);
+    if (closed) return;
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const source = new EventSource(`${BACKEND_URL}/api/v1/bubbles/${bubbleId}/stream${query}`);
+    eventSource = source;
+    attachStreamListeners(source, callbacks);
 
-  eventSource.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onMessage?.(data);
-    } catch {
-      // Ignored
-    }
-  };
-
-  eventSource.addEventListener("message", (e: any) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onMessage?.(data);
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("member_joined", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onMemberJoined?.(data);
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("member_removed", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onMemberRemoved?.({ user_id: data.user_id, removed_by_host: data.removed_by_host });
-    } catch {
-      // Ignore malformed member removal events.
-    }
-  });
-
-  eventSource.addEventListener("member_left", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onMemberLeft?.({ user_id: data.user_id, display_name: data.display_name || "A participant" });
-    } catch {
-      // Ignore malformed member leave events.
-    }
-  });
-
-  eventSource.addEventListener("anonymous_mode_updated", (e) => {
-    try {
-      const data = JSON.parse((e as MessageEvent).data);
-      callbacks.onAnonymousModeUpdated?.({ enabled: Boolean(data.enabled) });
-    } catch { /* Ignore malformed SSE event. */ }
-  });
-
-  eventSource.addEventListener("token", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onToken?.(data.token, data.seq);
-    } catch {
-      // Ignored
-    }
-  });
-
-  // AI participant tokens — routed to the intelligence panel, not the chat feed
-  eventSource.addEventListener("ai_token", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onAIToken?.(data.token);
-    } catch {
-      // Ignored
-    }
-  });
-
-  // AI participant full reply — routed to the intelligence panel
-  eventSource.addEventListener("ai_complete", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onAIComplete?.(data.text || "");
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("ai_error", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onAIError?.(data.message || "Bubble AI could not generate a response.");
-    } catch {
-      callbacks.onAIError?.("Bubble AI could not generate a response.");
-    }
-  });
-
-  eventSource.addEventListener("delta", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type === "pop_state_change") {
-        callbacks.onPopState?.(
-          data.status as PopState,
-          data.receipt_id,
-          data.pop_reason,
-          data.retention_policy,
-          data.message,
-          data.expiry_decision_deadline
-        );
-      } else {
-        callbacks.onDelta?.(data);
+    source.onerror = (err) => {
+      callbacks.onError?.(err);
+      // The browser retries dropped connections itself, but gives up for good on an
+      // HTTP error (e.g. an expired token). Reconnect with a freshly minted token.
+      if (source.readyState === EventSource.CLOSED && !closed) {
+        window.clearTimeout(retryTimer);
+        retryTimer = window.setTimeout(() => void connect(), 5000);
       }
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("complete", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onComplete?.(data as Intelligence);
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("graph", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onGraph?.(data as KnowledgeGraph);
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.addEventListener("presence", (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      callbacks.onPresence?.(data);
-    } catch {
-      // Ignored
-    }
-  });
-
-  eventSource.onerror = (err) => {
-    callbacks.onError?.(err);
+    };
   };
+
+  void connect();
 
   return () => {
-    eventSource.close();
+    closed = true;
+    window.clearTimeout(retryTimer);
+    eventSource?.close();
   };
+}
+
+function attachStreamListeners(source: EventSource, callbacks: SSECallbacks): void {
+  const on = (event: string, handle: (data: Record<string, unknown>) => void, onMalformed?: () => void) => {
+    source.addEventListener(event, (e) => {
+      try {
+        handle(JSON.parse((e as MessageEvent).data));
+      } catch {
+        onMalformed?.();
+      }
+    });
+  };
+
+  on("connected", (data) => callbacks.onConnected?.(data as { status: string; bubble_id: string }));
+  // Unnamed events also arrive as "message"; one listener covers both.
+  on("message", (data) => callbacks.onMessage?.(data));
+  on("member_joined", (data) => callbacks.onMemberJoined?.(data as unknown as BubbleMember));
+  on("member_removed", (data) =>
+    callbacks.onMemberRemoved?.({ user_id: String(data.user_id), removed_by_host: Boolean(data.removed_by_host) }));
+  on("member_left", (data) =>
+    callbacks.onMemberLeft?.({ user_id: String(data.user_id), display_name: String(data.display_name || "A participant") }));
+  on("anonymous_mode_updated", (data) => callbacks.onAnonymousModeUpdated?.({ enabled: Boolean(data.enabled) }));
+  on("token", (data) => callbacks.onToken?.(String(data.token ?? ""), data.seq as number | undefined));
+
+  // AI participant events — routed to the intelligence panel, not the chat feed
+  on("ai_token", (data) => callbacks.onAIToken?.(String(data.token ?? "")));
+  on("ai_complete", (data) => callbacks.onAIComplete?.(String(data.text || "")));
+  const aiErrorFallback = "Bubble AI could not generate a response.";
+  on(
+    "ai_error",
+    (data) => callbacks.onAIError?.(String(data.message || aiErrorFallback)),
+    () => callbacks.onAIError?.(aiErrorFallback),
+  );
+
+  on("delta", (data) => {
+    if (data.type === "pop_state_change") {
+      callbacks.onPopState?.(
+        data.status as PopState,
+        data.receipt_id as string | undefined,
+        data.pop_reason as string | undefined,
+        data.retention_policy as string | undefined,
+        data.message as string | undefined,
+        data.expiry_decision_deadline as string | undefined,
+      );
+    } else {
+      callbacks.onDelta?.(data);
+    }
+  });
+  on("complete", (data) => callbacks.onComplete?.(data as unknown as Intelligence));
+  on("graph", (data) => callbacks.onGraph?.(data as unknown as KnowledgeGraph));
+  on("presence", (data) => callbacks.onPresence?.(data as Parameters<NonNullable<SSECallbacks["onPresence"]>>[0]));
 }

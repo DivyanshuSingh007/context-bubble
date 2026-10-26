@@ -22,13 +22,10 @@ export function Header({
   hideTimer = false,
   readOnly = false,
 }: Props) {
-  const [mounted, setMounted] = useState(false);
   const [expiryLabel, setExpiryLabel] = useState<string>("");
   const [isExpiringSoon, setIsExpiringSoon] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-
     const update = () => {
       setExpiryLabel(formatExpiry(bubble.expiresAt));
       const msLeft = bubble.expiresAt.getTime() - Date.now();
@@ -73,7 +70,6 @@ export function Header({
         <div className="flex -space-x-2">
           {[...new Map(bubble.members.filter((member) => member.isOnline !== false).map((member) => [member.id, member])).values()].slice(0, 5).map((m) => (
             <span key={m.id} className="relative h-7 w-7">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               {m.avatar_animal ? (
                 <span title={m.name} className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#111827] bg-slate-700 text-base" aria-label={`${m.name}'s animal avatar`}>{m.avatar_animal}</span>
               ) : (
@@ -97,7 +93,7 @@ export function Header({
       </div>}
 
       {/* Expiry */}
-      {!hideTimer && mounted && expiryLabel && (
+      {!hideTimer && expiryLabel && (
         <div className={`hidden md:flex items-center gap-1.5 text-xs shrink-0 ${
           isExpiringSoon ? "text-amber-400 font-semibold animate-pulse" : "text-slate-400"
         }`}>

@@ -18,12 +18,10 @@ export interface SendMessageParams {
 export async function sendMessageToFirestore({
   bubbleId,
   authorId,
-  authorName,
   text,
   isAnonymous = false,
   attachments,
 }: SendMessageParams): Promise<string> {
-  const displayName = isAnonymous ? "Anonymous" : authorName;
   let docId = `msg-${Date.now()}`;
 
   try {
@@ -97,6 +95,20 @@ export function subscribeToBubbleMessages(
   };
 }
 
+interface BackendMessage {
+  id: string;
+  bubble_id: string;
+  type?: string;
+  author_id: string;
+  author_name: string;
+  author_avatar?: string | null;
+  author_animal?: string | null;
+  is_anonymous?: boolean;
+  text: string;
+  created_at?: string;
+  attachments?: Attachment[];
+}
+
 /**
  * Fetch message history directly from FastAPI backend
  */
@@ -117,16 +129,16 @@ export async function fetchMessagesFromBackend(bubbleId: string): Promise<Contri
     if (!res.ok) {
       throw new Error(`Failed to fetch bubble messages (${res.status})`);
     }
-    const list = await res.json();
+    const list: BackendMessage[] = await res.json();
     // Return oldest-first so the feed renders top→bottom like WhatsApp
-    return list.filter((m: any) => m.type !== "ai" && m.author_id !== "bubble-ai" && m.author_name !== "Bubble AI").map((m: any) => ({
+    return list.filter((m) => m.type !== "ai" && m.author_id !== "bubble-ai" && m.author_name !== "Bubble AI").map((m) => ({
       id: m.id,
       bubble_id: m.bubble_id,
       authorId: m.author_id,
       authorName: m.author_name,
       authorAvatar: m.is_anonymous ? undefined : m.author_avatar || undefined,
       authorAnimal: m.is_anonymous ? undefined : m.author_animal || undefined,
-      isAnonymous: m.is_anonymous,
+      isAnonymous: Boolean(m.is_anonymous),
       text: m.text,
       timestamp: m.created_at ? new Date(m.created_at) : new Date(),
       attachments: m.attachments,

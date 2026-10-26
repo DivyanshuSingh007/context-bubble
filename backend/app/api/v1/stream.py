@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Header, Query
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.deps import get_bubble_participant, get_current_user
 from app.intelligence.stream_manager import stream_manager
 from app.models.insight import SSEStreamEvent
 from app.core.logging import logger
@@ -22,7 +23,13 @@ async def stream_bubble_events(
     SSE stream endpoint for the bubble.
     Streams token-level partials, final semantic insight deltas, presence updates, and knowledge graph diffs.
     Supports reconnection replay via Last-Event-ID header.
+
+    EventSource cannot send an Authorization header, so the ID token arrives as
+    the `token` query parameter and must belong to a participant of the bubble.
     """
+    user = await get_current_user(authorization=f"Bearer {token}" if token else None)
+    await get_bubble_participant(bubble_id, user)
+
     queue = stream_manager.subscribe(bubble_id, last_event_id)
 
     async def event_generator():

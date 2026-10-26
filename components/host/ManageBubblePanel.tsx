@@ -250,7 +250,6 @@ export function ManageBubblePanel({
             <div className="flex flex-col gap-1.5">
               {bubble.members.filter((member) => member.id !== bubble.hostId && member.role !== "host" && member.isOnline === true).map((member) => (
                 <div key={member.id} className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#161d2e] px-2.5 py-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   {member.avatar_animal ? (
                     <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-800 text-lg" role="img" aria-label={`${member.name}'s animal avatar`}>{member.avatar_animal}</span>
                   ) : (

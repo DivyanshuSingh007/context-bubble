@@ -3,6 +3,9 @@ from typing import List, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
+# Committed placeholder; never valid outside development/test (see pop internal task endpoints).
+INSECURE_DEFAULT_INTERNAL_SECRET = "dev-internal-secret-for-cloud-tasks-and-schedulers"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -48,7 +51,7 @@ class Settings(BaseSettings):
 
     # Security & Verification
     FIREBASE_APP_CHECK_ENFORCE: bool = False
-    SERVER_INTERNAL_SECRET: str = "dev-internal-secret-for-cloud-tasks-and-schedulers"
+    SERVER_INTERNAL_SECRET: str = INSECURE_DEFAULT_INTERNAL_SECRET
     REDIS_URL: str | None = None
 
     # Bubble Constraints & Debouncing

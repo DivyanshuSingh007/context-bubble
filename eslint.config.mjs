@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated/vendored output that is not project source:
+    ".firebase/**",
+    ".venv/**",
+    "backend/**",
   ]),
 ]);
 

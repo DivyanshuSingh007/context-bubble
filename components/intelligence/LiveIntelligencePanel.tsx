@@ -50,6 +50,12 @@ function cleanLiveSummary(value: string): string {
   return keepOverviewSentences(`${prefix.replace(/[\s,;:]+$/, "")}…`);
 }
 
+// The backend may send snake_case keys alongside the client's camelCase shape.
+type IntelligenceWire = Intelligence & {
+  missing_pieces?: Intelligence["missingPieces"];
+  next_steps?: string[];
+};
+
 interface Props {
   intelligence: Intelligence;
   knowledgeGraph?: KnowledgeGraph | null;
@@ -89,8 +95,8 @@ export function LiveIntelligencePanel({
     const hasDemoDisagreement = (intelligence.disagreements || []).some(
       (d) => d.sideA?.label?.toLowerCase().includes("retention") && d.sideB?.label?.toLowerCase().includes("pricing")
     );
-    const hasDemoMissingPiece = (intelligence.missingPieces || (intelligence as any).missing_pieces || []).some(
-      (mp: any) => mp.description?.toLowerCase().includes("churn")
+    const hasDemoMissingPiece = (intelligence.missingPieces || (intelligence as IntelligenceWire).missing_pieces || []).some(
+      (mp) => mp.description?.toLowerCase().includes("churn")
     );
 
     if (hasDemoSummary || hasDemoDisagreement || hasDemoMissingPiece) {
@@ -141,7 +147,7 @@ export function LiveIntelligencePanel({
 
     const derivedDisagreements: Array<{ id: string; sideA: { count: number; label: string }; sideB: { count: number; label: string } }> = [];
     if (validHumanContributions.length >= 2) {
-      let side1Text = cleanSnippet(firstMsg.text, 45);
+      const side1Text = cleanSnippet(firstMsg.text, 45);
       let side2Text = cleanSnippet(latestMsg.text, 45);
       if (side1Text.toLowerCase() === side2Text.toLowerCase() && recentMsgs.length > 2) {
         side2Text = cleanSnippet(recentMsgs[1].text, 45);
@@ -231,23 +237,23 @@ export function LiveIntelligencePanel({
 
   const missingPiecesList = useMemo(() => {
     if (validHumanContributions.length === 0) return [];
-    const existing = intelligence.missingPieces || (intelligence as any).missing_pieces;
+    const existing = intelligence.missingPieces || (intelligence as IntelligenceWire).missing_pieces;
     if (isStaleDemo || !existing || existing.length === 0) {
       return derivedIntelligence.missingPieces;
     }
     return existing;
-  }, [validHumanContributions.length, isStaleDemo, intelligence.missingPieces, derivedIntelligence.missingPieces]);
+  }, [validHumanContributions.length, isStaleDemo, intelligence, derivedIntelligence.missingPieces]);
 
   const nextSteps = useMemo(() => {
     if (validHumanContributions.length === 0) return [];
-    const existing = (intelligence.nextSteps || (intelligence as any).next_steps || []).filter(
-      (s: any) => typeof s === "string" && s.trim()
+    const existing = (intelligence.nextSteps || (intelligence as IntelligenceWire).next_steps || []).filter(
+      (s) => typeof s === "string" && s.trim()
     );
     if (isStaleDemo || !existing || existing.length === 0) {
       return derivedIntelligence.nextSteps;
     }
     return existing;
-  }, [validHumanContributions.length, isStaleDemo, intelligence.nextSteps, derivedIntelligence.nextSteps]);
+  }, [validHumanContributions.length, isStaleDemo, intelligence, derivedIntelligence.nextSteps]);
 
   const displayGraph = useMemo(() => {
     // If backend provided a knowledgeGraph without old claim nodes, prefer it

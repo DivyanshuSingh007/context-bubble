@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import type { Bubble, Role, Contribution, Attachment, KnowledgeGraph, PopState, ExecutiveBriefing } from "@/types";
+import type { Bubble, BubbleMember, Role, Contribution, Attachment, KnowledgeGraph, ExecutiveBriefing } from "@/types";
 import { Header } from "@/components/layout/Header";
 import { ContributionFeed } from "@/components/participant/ContributionFeed";
 import { LiveIntelligencePanel } from "@/components/intelligence/LiveIntelligencePanel";
@@ -25,8 +25,13 @@ interface Props {
 function mergeIntelligence(previous: Bubble["intelligence"], incoming: Partial<Bubble["intelligence"]>, allowEmptyLists = false) {
   const keepOrReplace = <T,>(oldItems: T[], nextItems: T[] | undefined) =>
     Array.isArray(nextItems) && (allowEmptyLists || nextItems.length > 0) ? nextItems : oldItems;
-  const missingPiecesIncoming = incoming.missingPieces ?? (incoming as any).missing_pieces;
-  const nextStepsIncoming = incoming.nextSteps ?? (incoming as Partial<Bubble["intelligence"]> & { next_steps?: string[] }).next_steps;
+  // The backend may send snake_case keys; normalize them to the client shape.
+  const wire = incoming as Partial<Bubble["intelligence"]> & {
+    missing_pieces?: Bubble["intelligence"]["missingPieces"];
+    next_steps?: string[];
+  };
+  const missingPiecesIncoming = incoming.missingPieces ?? wire.missing_pieces;
+  const nextStepsIncoming = incoming.nextSteps ?? wire.next_steps;
   return {
     ...previous,
     ...incoming,
@@ -65,7 +70,6 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
   const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   const [isLeavingBubble, setIsLeavingBubble] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
-  const [newCount, setNewCount] = useState(0);
   const [anonymousPreference, setAnonymousPreference] = useState(false);
 
   // Live SSE stream state
@@ -146,7 +150,7 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
           expiresAt: data.expires_at ? new Date(data.expires_at) : prev.expiresAt,
           memberCount: data.member_count ?? prev.memberCount,
           members: data.members && data.members.length > 0
-            ? (data.members as any[]).map((member) => {
+            ? (data.members as BubbleMember[]).map((member) => {
               if (member.id !== user?.uid) return member;
               const current = prev.members.find((item) => item.id === member.id);
               return current?.avatar ? { ...member, avatar: current.avatar, avatar_animal: current.avatar_animal } : member;
@@ -320,7 +324,7 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
       // Fetch the real generated briefing from backend
       const realBriefing = await getBriefing(bubble.id);
       if (realBriefing) {
-        setBriefing(realBriefing as any);
+        setBriefing(realBriefing);
       }
     } catch {
       // Non-fatal — we'll still redirect
@@ -454,13 +458,13 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
           }));
         }
       },
-      onDelta: (delta: any) => {
+      onDelta: (delta) => {
         setIsSynthesizing(false);
         setStreamingToken("");
         if (delta) {
           setBubble((prev) => ({
             ...prev,
-            intelligence: mergeIntelligence(prev.intelligence, delta),
+            intelligence: mergeIntelligence(prev.intelligence, delta as Partial<Bubble["intelligence"]>),
           }));
         }
       },
@@ -603,7 +607,6 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
         ...prev,
         contributions: [...prev.contributions, newContribution],
       }));
-      setNewCount((n) => n + 1);
 
       // 2. Persist to Firestore & notify backend AI pipeline
       sendMessageToFirestore({
@@ -629,14 +632,16 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
       .catch(() => {});
   }, [bubble.id]);
 
+  const userUid = user?.uid;
+
   const handleToggleAnonymousPreference = useCallback(() => {
-    if (!user?.uid || !bubble.anonymousModeEnabled) return;
+    if (!userUid || !bubble.anonymousModeEnabled) return;
     setAnonymousPreference((prev) => {
       const next = !prev;
-      window.localStorage.setItem(`context_bubble_anonymous:${bubble.id}:${user.uid}`, String(next));
+      window.localStorage.setItem(`context_bubble_anonymous:${bubble.id}:${userUid}`, String(next));
       return next;
     });
-  }, [bubble.id, bubble.anonymousModeEnabled, user?.uid]);
+  }, [bubble.id, bubble.anonymousModeEnabled, userUid]);
 
   const handleToggleAnonymousAvailability = useCallback(async () => {
     const enabled = !bubble.anonymousModeEnabled;
@@ -645,12 +650,12 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
       setBubble((prev) => ({ ...prev, anonymousModeEnabled: enabled }));
       if (!enabled) {
         setAnonymousPreference(false);
-        if (user?.uid) window.localStorage.removeItem(`context_bubble_anonymous:${bubble.id}:${user.uid}`);
+        if (userUid) window.localStorage.removeItem(`context_bubble_anonymous:${bubble.id}:${userUid}`);
       }
     } catch (err) {
       console.warn("Could not update anonymous availability:", err);
     }
-  }, [bubble.id, bubble.anonymousModeEnabled, user?.uid]);
+  }, [bubble.id, bubble.anonymousModeEnabled, userUid]);
 
   const handleLeaveBubble = useCallback(async () => {
     setIsLeavingBubble(true);
@@ -849,14 +854,11 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
         <div className="flex-1 min-w-0 flex flex-col bg-[#0f1525] rounded-2xl border border-white/5 p-4 mr-3 overflow-hidden shadow-xl">
           <ContributionFeed
             bubbleId={bubble.id}
-            userId={user?.uid || "guest"}
-            userName={initialUserName || user?.displayName || "Participant"}
             contributions={bubble.contributions}
             isAnonymous={anonymousPreference}
             isLive={!readOnly && bubble.isLive && bubble.popState === "ACTIVE"}
             hideAttachments={retentionPolicy === "view-only"}
             onToggleAnonymous={bubble.anonymousModeEnabled ? handleToggleAnonymousPreference : undefined}
-            newCount={newCount}
             typingUsers={typingUsers}
             onNewContribution={handleNewContribution}
           />

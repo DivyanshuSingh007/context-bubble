@@ -23,10 +23,13 @@ export interface AppUser {
   getIdToken: () => Promise<string>;
 }
 
+type FirebaseErrorLike = { code?: string; message?: string } | null | undefined;
+
 /**
  * Format human-readable Firebase Auth errors
  */
-export function formatAuthError(err: any): string {
+export function formatAuthError(error: unknown): string {
+  const err = error as FirebaseErrorLike;
   const code = (err?.code || "").toLowerCase();
   const msg = (err?.message || "").toLowerCase();
 
@@ -97,7 +100,7 @@ export async function signInWithEmail(email: string, password: string): Promise<
   try {
     const result = await signInWithEmailAndPassword(auth, email.trim(), password);
     return persistAuthenticatedUser(result.user);
-  } catch (err: any) {
+  } catch (err) {
     throw new Error(formatAuthError(err));
   }
 }
@@ -111,13 +114,13 @@ export async function signInWithGoogle(): Promise<AppUser> {
   try {
     const result = await signInWithPopup(auth, provider);
     return await persistAuthenticatedUser(result.user);
-  } catch (err: any) {
-    const code = (err?.code || "").toLowerCase();
+  } catch (err) {
+    const code = ((err as FirebaseErrorLike)?.code || "").toLowerCase();
     if (code === "auth/popup-blocked" || code.includes("popup-blocked")) {
       try {
         await signInWithRedirect(auth, provider);
         return new Promise(() => {});
-      } catch (redirectErr: any) {
+      } catch (redirectErr) {
         throw new Error(formatAuthError(redirectErr));
       }
     }
@@ -136,7 +139,7 @@ export async function createEmailAccount(name: string, email: string, password: 
     await updateProfile(result.user, { displayName: cleanName, photoURL: avatarUrl });
     // Require an explicit sign-in after registration so the user lands on the sign-in form.
     await signOutUser();
-  } catch (err: any) {
+  } catch (err) {
     throw new Error(formatAuthError(err));
   }
 }
@@ -212,7 +215,7 @@ export function useFirebaseAuth() {
   // localStorage / Firebase Auth state is loaded in useEffect (client-only).
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
 
   useEffect(() => {
     // Only runs on client after hydration — safe to read localStorage and Firebase Auth.

@@ -7,28 +7,22 @@ import { InputBar } from "./InputBar";
 
 interface Props {
   bubbleId?: string;
-  userId?: string;
-  userName?: string;
   contributions: Contribution[];
   isAnonymous: boolean;
   isLive?: boolean;
   hideAttachments?: boolean;
   onToggleAnonymous?: () => void;
-  newCount?: number;
   typingUsers?: string[];
   onNewContribution: (text: string, attachments?: Attachment[]) => void;
 }
 
 export function ContributionFeed({
   bubbleId = "demo",
-  userId,
-  userName,
   contributions,
   isAnonymous,
   isLive = true,
   hideAttachments = false,
   onToggleAnonymous,
-  newCount = 0,
   typingUsers = [],
   onNewContribution,
 }: Props) {
@@ -111,8 +105,6 @@ export function ContributionFeed({
         {isLive ? (
           <InputBar
             bubbleId={bubbleId}
-            userId={userId}
-            userName={userName}
             isAnonymous={isAnonymous}
             onToggleAnonymous={onToggleAnonymous}
             onSubmit={onNewContribution}

@@ -49,8 +49,8 @@ export function AuthModal({
       const user = await signInWithEmail(email, password);
       onSuccess?.(user);
       onClose?.();
-    } catch (err: any) {
-      setError(err?.message || "Authentication failed. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Authentication failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -64,8 +64,8 @@ export function AuthModal({
       const user = await signInWithGoogle();
       onSuccess?.(user);
       onClose?.();
-    } catch (err: any) {
-      setError(err?.message || "Google sign-in failed. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed. Please try again.");
     } finally {
       setGoogleLoading(false);
     }

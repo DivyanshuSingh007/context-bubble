@@ -21,7 +21,7 @@ except ImportError:
     FastAPIInstrumentor = None
     HAS_OTEL_INSTRUMENTOR = False
 
-from app.core.config import settings
+from app.core.config import settings, INSECURE_DEFAULT_INTERNAL_SECRET
 from app.core.logging import logger
 from app.core.telemetry import init_telemetry
 from app.core.exceptions import BubbleException
@@ -37,6 +37,11 @@ from app.core.firestore_compat import InMemoryFirestoreClient
 async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"Starting Context Bubble backend (Env: {settings.ENVIRONMENT})")
+    if settings.ENVIRONMENT not in ("development", "test") and settings.SERVER_INTERNAL_SECRET == INSECURE_DEFAULT_INTERNAL_SECRET:
+        logger.warning(
+            "SERVER_INTERNAL_SECRET is unset; internal task webhooks are disabled and shred receipts "
+            "are signed with a public placeholder key. Set SERVER_INTERNAL_SECRET in the environment."
+        )
     init_telemetry("context-bubble-backend")
     init_firebase()
     # Eagerly initialize Firestore async client
@@ -99,6 +104,13 @@ app.add_middleware(
 )
 
 
+def _public_error_message(exc: Exception) -> str:
+    # Raw exception text can leak internals (paths, queries, credentials) to clients.
+    if settings.ENVIRONMENT in ("development", "test"):
+        return str(exc)
+    return "An unexpected error occurred."
+
+
 @app.middleware("http")
 async def logging_and_timing_middleware(request: Request, call_next):
     start_time = time.time()
@@ -122,7 +134,7 @@ async def logging_and_timing_middleware(request: Request, call_next):
             content={
                 "error": {
                     "code": "INTERNAL_SERVER_ERROR",
-                    "message": str(exc),
+                    "message": _public_error_message(exc),
                 }
             },
             headers={
@@ -147,7 +159,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
         content={
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
-                "message": str(exc),
+                "message": _public_error_message(exc),
             }
         },
         headers={

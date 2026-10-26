@@ -1,12 +1,26 @@
 "use client";
 
 import { BACKEND_URL } from "@/lib/api";
+import { getCurrentIdToken } from "@/lib/auth";
 
 export interface AudioStreamHandlers {
   onPartial?: (text: string) => void;
   onFinal?: (text: string) => void;
   onError?: (err: Error) => void;
 }
+
+// Minimal Web Speech API surface (not yet in TypeScript's DOM lib).
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
 /**
  * LiveAudioSession — records audio via MediaRecorder and streams it to the
@@ -20,26 +34,17 @@ export interface AudioStreamHandlers {
  */
 export class LiveAudioSession {
   private bubbleId: string;
-  private userId: string;
-  private userName: string;
   private ws: WebSocket | null = null;
   private mediaRecorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private handlers: AudioStreamHandlers;
   private isRecording = false;
   private finalReceived = false;
-  private speechRecognition: any = null;
+  private speechRecognition: SpeechRecognitionLike | null = null;
   private clientTranscript: string = "";
 
-  constructor(
-    bubbleId: string,
-    userId: string,
-    userName: string,
-    handlers: AudioStreamHandlers
-  ) {
+  constructor(bubbleId: string, handlers: AudioStreamHandlers) {
     this.bubbleId = bubbleId;
-    this.userId = userId;
-    this.userName = userName;
     this.handlers = handlers;
   }
 
@@ -49,10 +54,10 @@ export class LiveAudioSession {
     this.finalReceived = false;
 
     // 1. Initialize browser-native Web Speech API for instant (<1s) local speech recognition
-    const SpeechRecognitionClass =
-      typeof window !== "undefined"
-        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        : null;
+    const speechWindow = typeof window !== "undefined"
+      ? (window as unknown as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor })
+      : null;
+    const SpeechRecognitionClass = speechWindow?.SpeechRecognition || speechWindow?.webkitSpeechRecognition;
 
     if (SpeechRecognitionClass) {
       try {
@@ -61,7 +66,7 @@ export class LiveAudioSession {
         recognition.interimResults = true;
         recognition.lang = "en-US";
 
-        recognition.onresult = (event: any) => {
+        recognition.onresult = (event) => {
           let fullText = "";
           for (let i = 0; i < event.results.length; i++) {
             const res = event.results[i];
@@ -75,7 +80,7 @@ export class LiveAudioSession {
           }
         };
 
-        recognition.onerror = (e: any) => {
+        recognition.onerror = (e) => {
           console.debug("Web Speech API notice:", e?.error || e);
         };
 
@@ -96,12 +101,12 @@ export class LiveAudioSession {
         },
       });
 
-      // 3. Build WebSocket URL to backend
-      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = BACKEND_URL.replace(/^https?:\/\//, "");
-      const wsUrl = `${wsProtocol}//${host}/api/v1/bubbles/${this.bubbleId}/audio?user_id=${encodeURIComponent(
-        this.userId
-      )}&user_name=${encodeURIComponent(this.userName)}`;
+      // 3. Build WebSocket URL to backend. The server derives the speaker from the
+      // verified token; browsers cannot set headers on a WebSocket handshake.
+      const token = await getCurrentIdToken().catch(() => null);
+      const wsUrl = new URL(`${BACKEND_URL}/api/v1/bubbles/${this.bubbleId}/audio`);
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+      if (token) wsUrl.searchParams.set("token", token);
 
       this.ws = new WebSocket(wsUrl);
       this.ws.binaryType = "arraybuffer";

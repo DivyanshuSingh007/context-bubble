@@ -1,10 +1,11 @@
+import hmac
 from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 from app.core.firestore_compat import firestore
 
 from app.api.deps import require_bubble_host, get_bubble_participant, AuthenticatedUser, get_current_user
-from app.core.config import settings
+from app.core.config import settings, INSECURE_DEFAULT_INTERNAL_SECRET
 from app.models.export import PopBubbleRequest, ExportConfig, ExportRecord
 from app.services.firebase import get_async_firestore_client
 from app.pop.state_machine import PopStateMachine
@@ -15,6 +16,21 @@ router = APIRouter()
 
 class TaskExecutePayload(BaseModel):
     bubble_id: str
+
+
+def _require_internal_secret(provided: Optional[str]) -> None:
+    """Guards Cloud Tasks / Scheduler webhooks. Outside development/test the
+    committed placeholder secret is rejected, so these endpoints stay closed
+    until a real SERVER_INTERNAL_SECRET is configured."""
+    if settings.ENVIRONMENT in ("development", "test"):
+        return
+    expected = settings.SERVER_INTERNAL_SECRET
+    if (
+        not provided
+        or expected == INSECURE_DEFAULT_INTERNAL_SECRET
+        or not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal task secret.")
 
 
 @router.post("")
@@ -134,8 +150,7 @@ async def execute_cloud_task_pop(
     x_server_internal_secret: Optional[str] = Header(None, alias="X-Server-Internal-Secret"),
 ):
     """Internal webhook called by Google Cloud Tasks when the timer hits zero."""
-    if x_server_internal_secret != settings.SERVER_INTERNAL_SECRET and settings.ENVIRONMENT not in ("development", "test"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal task secret.")
+    _require_internal_secret(x_server_internal_secret)
 
     db = get_async_firestore_client()
     state_machine = PopStateMachine(db)
@@ -148,8 +163,7 @@ async def execute_sweeper(
     x_server_internal_secret: Optional[str] = Header(None, alias="X-Server-Internal-Secret"),
 ):
     """Internal webhook called by Google Cloud Scheduler to check for missed expired bubbles."""
-    if x_server_internal_secret != settings.SERVER_INTERNAL_SECRET and settings.ENVIRONMENT not in ("development", "test"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal secret.")
+    _require_internal_secret(x_server_internal_secret)
 
     db = get_async_firestore_client()
     scheduler = PopScheduler(db)
