@@ -128,11 +128,24 @@ class GeminiAdapter(LLMAdapter):
                 self._client = None
         else:
             self._client = None
-            logger.info("GeminiAdapter initialized in mock/local fallback mode")
+            if settings.ENVIRONMENT == "test":
+                logger.info("GeminiAdapter initialized in mock mode for tests")
+            else:
+                logger.error("GEMINI_API_KEY is not configured; AI synthesis and briefings are disabled.")
 
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    @property
+    def is_configured(self) -> bool:
+        return self._client is not None
+
+    def _require_client_outside_tests(self) -> None:
+        # The mock fabricates "insights" by quoting chat messages back. That is only
+        # acceptable in the test suite; anywhere else it reads as the AI echoing users.
+        if settings.ENVIRONMENT != "test":
+            raise RuntimeError("Gemini is not configured (missing or invalid GEMINI_API_KEY).")
 
     def _get_generation_models(self) -> List[str]:
         """Returns ordered list of candidate models with preferred model first, strictly constrained."""
@@ -161,7 +174,7 @@ class GeminiAdapter(LLMAdapter):
         response_schema: Optional[Type[T]] = None,
     ) -> LLMResponse:
         if not self._client:
-            # Fallback mock for local unit tests without real API key
+            self._require_client_outside_tests()
             content = self._mock_generate(prompt, response_schema)
             parsed = None
             if response_schema:
@@ -297,6 +310,7 @@ class GeminiAdapter(LLMAdapter):
         max_tokens: int = 2048,
     ) -> AsyncIterator[str]:
         if not self._client:
+            self._require_client_outside_tests()
             mock_tokens = ["Hello ", "from ", "Bubble ", "AI. ", "I ", "am ", "analyzing ", "your ", "session."]
             for token in mock_tokens:
                 yield token

@@ -379,6 +379,33 @@ export async function getBriefing(bubbleId: string): Promise<ExecutiveBriefing |
 }
 
 /**
+ * Downloads the decision record PDF rendered by the backend.
+ * Fetched with the auth header (a plain link cannot send it), then saved as a file.
+ */
+export async function downloadBriefingPdf(bubbleId: string, filename: string): Promise<void> {
+  const headers = await getAuthHeaders(false);
+  const res = await fetch(`${BACKEND_URL}/api/v1/bubbles/${bubbleId}/pop/briefing/pdf`, { headers });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Could not download the decision record (${res.status})`);
+  }
+  saveBlob(await res.blob(), filename);
+}
+
+/** Triggers a browser download for in-memory content. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoke after the click has been handled so the download is not cancelled.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
  * Fetches current pop status and list of external export records.
  */
 export async function getPopStatus(

@@ -6,6 +6,7 @@ import { deleteAllBubbleHistory, deleteBubbleHistoryEntry, getBriefing, getBubbl
 import { useFirebaseAuth } from "@/lib/auth";
 import { AmbientBubbles } from "@/components/layout/AmbientBubbles";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DecisionRecordDownloads } from "@/components/bubble/DecisionRecordDownloads";
 import type { ExecutiveBriefing } from "@/types";
 
 export function BubbleHistoryPage() {
@@ -13,7 +14,8 @@ export function BubbleHistoryPage() {
   const [entries, setEntries] = useState<BubbleHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [briefing, setBriefing] = useState<ExecutiveBriefing | null>(null);
+  const [briefing, setBriefing] = useState<{ bubbleId: string; record: ExecutiveBriefing } | null>(null);
+  const [openingRecordId, setOpeningRecordId] = useState<string | null>(null);
   const [deletingBubbleId, setDeletingBubbleId] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ kind: "one"; id: string; title: string } | { kind: "all" } | null>(null);
@@ -30,8 +32,15 @@ export function BubbleHistoryPage() {
   }, [authLoading, user?.uid]);
 
   const openBriefing = async (bubbleId: string) => {
-    const record = await getBriefing(bubbleId);
-    setBriefing(record);
+    setError("");
+    setOpeningRecordId(bubbleId);
+    try {
+      const record = await getBriefing(bubbleId);
+      if (record) setBriefing({ bubbleId, record });
+      else setError("This decision record is no longer available.");
+    } finally {
+      setOpeningRecordId(null);
+    }
   };
 
   const removeBubble = async (bubbleId: string, title: string) => {
@@ -94,7 +103,7 @@ export function BubbleHistoryPage() {
               </div>
               <div className="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0">
                 {entry.is_viewable && <Link href={`/bubble/${entry.bubble_id}?mode=view`} className="cursor-pointer rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-violet-500">View bubble</Link>}
-                {entry.decision_record_shared && <button type="button" onClick={() => void openBriefing(entry.bubble_id)} className="cursor-pointer rounded-xl border border-white/10 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5">View decision record</button>}
+                {entry.decision_record_shared && <button type="button" disabled={openingRecordId === entry.bubble_id} onClick={() => void openBriefing(entry.bubble_id)} className="cursor-pointer rounded-xl border border-white/10 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:opacity-50">{openingRecordId === entry.bubble_id ? "Opening…" : "View decision record"}</button>}
                 <button type="button" disabled={deletingAll || deletingBubbleId === entry.bubble_id} onClick={() => setPendingDelete({ kind: "one", id: entry.bubble_id, title: entry.title || "Ended bubble" })} className="cursor-pointer rounded-xl border border-rose-500/30 px-3.5 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-950/40 disabled:opacity-50">{deletingBubbleId === entry.bubble_id ? "Deleting…" : "Delete"}</button>
                 {!entry.is_viewable && !entry.decision_record_shared && <span className="self-center text-xs text-slate-500">Session content was removed</span>}
               </div>
@@ -103,39 +112,7 @@ export function BubbleHistoryPage() {
         </div>
       </div>
 
-      {briefing && <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4" onClick={() => setBriefing(null)}>
-        <section className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-violet-500/20 bg-[#111827] p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-wider text-violet-300">Shared Decision Record</p>
-              <h2 className="mt-1 text-xl font-bold">{briefing.bubble_title}</h2>
-              {briefing.generated_at && (
-                <p className="text-xs text-slate-400 mt-0.5">Generated: {new Date(briefing.generated_at).toLocaleString()}</p>
-              )}
-            </div>
-            <button type="button" onClick={() => setBriefing(null)} className="cursor-pointer text-slate-400 hover:text-white">Close</button>
-          </div>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{briefing.executive_summary}</p>
-          {briefing.decisions?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-300">Decisions</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></div>}
-          {briefing.consensus_points?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">Points of Consensus</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.consensus_points.map((c, i) => <li key={i}>{c}</li>)}</ul></div>}
-          {briefing.disagreements?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-amber-300">Open Disagreements</h3><div className="mt-2 space-y-2">{briefing.disagreements.map((dg, i) => <div key={i} className="rounded-lg bg-amber-950/20 border border-amber-500/20 p-2.5 text-xs text-slate-300"><span className="font-semibold text-amber-300">{dg.topic}: </span>{dg.perspective_a} <em>vs</em> {dg.perspective_b}</div>)}</div></div>}
-          {briefing.blockers?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-rose-300">Identified Blockers</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.blockers.map((b, i) => <li key={i}>⚠️ {b}</li>)}</ul></div>}
-          {briefing.action_items?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Action items</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.action_items.map((a, i) => <li key={i}>[{a.priority?.toUpperCase() || "MED"}] {a.task}{a.owner ? ` — ${a.owner}` : ""}</li>)}</ul></div>}
-          {briefing.graph_summary && (briefing.graph_summary.total_nodes > 0 || briefing.graph_summary.key_relationships?.length > 0) && (
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-indigo-300">Knowledge Graph Synthesis</h3>
-              <p className="mt-1 text-xs text-slate-400">{briefing.graph_summary.total_nodes} entities · {briefing.graph_summary.total_edges} connections</p>
-              {briefing.graph_summary.key_relationships?.length > 0 && (
-                <ul className="mt-2 space-y-1 pl-1 text-xs text-slate-300">
-                  {briefing.graph_summary.key_relationships.map((rel, i) => (
-                    <li key={i} className="rounded bg-indigo-950/30 px-2 py-1 border border-indigo-500/20">☍ {rel}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </section>
-      </div>}
+      {briefing && <DecisionRecordModal bubbleId={briefing.bubbleId} briefing={briefing.record} onClose={() => setBriefing(null)} />}
 
       {pendingDelete && <ConfirmDialog
         title={pendingDelete.kind === "all" ? "Remove all bubbles from My Bubbles?" : `Remove “${pendingDelete.title}”?`}
@@ -154,5 +131,46 @@ export function BubbleHistoryPage() {
         }}
       />}
     </main>
+  );
+}
+
+function DecisionRecordModal({ bubbleId, briefing, onClose }: { bubbleId: string; briefing: ExecutiveBriefing; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4" onClick={onClose}>
+      <section role="dialog" aria-modal="true" aria-labelledby="decision-record-title" className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-violet-500/20 bg-[#111827] p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-wider text-violet-300">Shared Decision Record</p>
+            <h2 id="decision-record-title" className="mt-1 text-xl font-bold">{briefing.bubble_title}</h2>
+            {briefing.generated_at && (
+              <p className="text-xs text-slate-400 mt-0.5">Generated: {new Date(briefing.generated_at).toLocaleString()}</p>
+            )}
+          </div>
+          <button type="button" onClick={onClose} className="cursor-pointer shrink-0 text-slate-400 hover:text-white">Close</button>
+        </div>
+        <div className="flex justify-end border-b border-white/10 pb-4">
+          <DecisionRecordDownloads bubbleId={bubbleId} briefing={briefing} />
+        </div>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{briefing.executive_summary}</p>
+        {briefing.decisions?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-300">Decisions</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul></div>}
+        {briefing.consensus_points?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">Points of Consensus</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.consensus_points.map((c, i) => <li key={i}>{c}</li>)}</ul></div>}
+        {briefing.disagreements?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-amber-300">Open Disagreements</h3><div className="mt-2 space-y-2">{briefing.disagreements.map((dg, i) => <div key={i} className="rounded-lg bg-amber-950/20 border border-amber-500/20 p-2.5 text-xs text-slate-300"><span className="font-semibold text-amber-300">{dg.topic}: </span>{dg.perspective_a} <em>vs</em> {dg.perspective_b}</div>)}</div></div>}
+        {briefing.blockers?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-rose-300">Identified Blockers</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.blockers.map((b, i) => <li key={i}>⚠️ {b}</li>)}</ul></div>}
+        {briefing.action_items?.length > 0 && <div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Action items</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">{briefing.action_items.map((a, i) => <li key={i}>[{a.priority?.toUpperCase() || "MED"}] {a.task}{a.owner ? ` — ${a.owner}` : ""}</li>)}</ul></div>}
+        {briefing.graph_summary && (briefing.graph_summary.total_nodes > 0 || briefing.graph_summary.key_relationships?.length > 0) && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-indigo-300">Knowledge Graph Synthesis</h3>
+            <p className="mt-1 text-xs text-slate-400">{briefing.graph_summary.total_nodes} entities · {briefing.graph_summary.total_edges} connections</p>
+            {briefing.graph_summary.key_relationships?.length > 0 && (
+              <ul className="mt-2 space-y-1 pl-1 text-xs text-slate-300">
+                {briefing.graph_summary.key_relationships.map((rel, i) => (
+                  <li key={i} className="rounded bg-indigo-950/30 px-2 py-1 border border-indigo-500/20">☍ {rel}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

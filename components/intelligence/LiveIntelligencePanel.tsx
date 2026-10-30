@@ -83,177 +83,28 @@ export function LiveIntelligencePanel({
     sideB: { count: number; label: string };
   } | null>(null);
 
-  const validHumanContributions = useMemo(() => {
-    return (contributions || []).filter(
+  const hasHumanContributions = useMemo(
+    () => (contributions || []).some(
       (c) => c && typeof c.text === "string" && c.text.trim().length > 0 && c.authorId !== "bubble-ai" && c.authorName !== "Bubble AI"
-    );
-  }, [contributions]);
+    ),
+    [contributions],
+  );
 
-  const isStaleDemo = useMemo(() => {
-    const sum = (intelligence.summary || "").toLowerCase();
-    const hasDemoSummary = sum.includes("retention is a major concern") || sum.includes("team aligned on key product priorities");
-    const hasDemoDisagreement = (intelligence.disagreements || []).some(
-      (d) => d.sideA?.label?.toLowerCase().includes("retention") && d.sideB?.label?.toLowerCase().includes("pricing")
-    );
-    const hasDemoMissingPiece = (intelligence.missingPieces || (intelligence as IntelligenceWire).missing_pieces || []).some(
-      (mp) => mp.description?.toLowerCase().includes("churn")
-    );
-
-    if (hasDemoSummary || hasDemoDisagreement || hasDemoMissingPiece) {
-      const contribsText = validHumanContributions.map((c) => c.text.toLowerCase()).join(" ");
-      const isPurelyOriginalScript = contribsText.includes("churn") && contribsText.includes("retention dropped 18%") && validHumanContributions.length === 5;
-      return !isPurelyOriginalScript;
-    }
-    return false;
-  }, [intelligence, validHumanContributions]);
-
-  const derivedIntelligence = useMemo(() => {
-    if (validHumanContributions.length === 0) {
-      return {
-        summary: "",
-        disagreements: [],
-        missingPieces: [],
-        nextSteps: [],
-        raw_insights: [],
-      };
-    }
-
-    const authors = Array.from(new Set(validHumanContributions.map((c) => c.authorName || "User")));
-    const recentMsgs = validHumanContributions.slice(-10);
-    const latestMsg = recentMsgs[recentMsgs.length - 1];
-    const firstMsg = recentMsgs[0];
-
-    const cleanSnippet = (text: string, maxLen = 80) => {
-      const trimmed = text.replace(/[\n\r]+/g, " ").trim();
-      if (trimmed.length <= maxLen) return trimmed.replace(/[.?!]+$/, "");
-      const cut = trimmed.slice(0, maxLen);
-      const lastSpace = cut.lastIndexOf(" ");
-      return (lastSpace > 20 ? cut.slice(0, lastSpace) : cut).trim().replace(/[.?!]+$/, "");
-    };
-
-    let derivedSummary = "";
-    if (validHumanContributions.length === 1) {
-      derivedSummary = `${firstMsg.authorName} opened deliberation: "${firstMsg.text.trim()}". Awaiting team perspectives to map alignment and trade-offs.`;
-    } else if (validHumanContributions.length === 2) {
-      derivedSummary = `Deliberation is underway between ${authors.join(" and ")}. ${firstMsg.authorName} noted that ${cleanSnippet(firstMsg.text, 90).toLowerCase()}, while ${latestMsg.authorName} emphasized ${cleanSnippet(latestMsg.text, 90).toLowerCase()}. The team is establishing initial points of alignment.`;
-    } else {
-      const authorSummary = authors.slice(0, 3).join(", ") + (authors.length > 3 ? ` and ${authors.length - 3} others` : "");
-      const mainTopic = cleanSnippet(firstMsg.text, 90).toLowerCase();
-      const contrastKeywords = ["but", "however", "instead", "disagree", "versus", "vs", "prefer", "rather", "pricing", "timing", "risk", "delay"];
-      const contrastingMsg = recentMsgs.find((m) => m !== firstMsg && contrastKeywords.some((k) => m.text.toLowerCase().includes(k))) || latestMsg;
-      const contrastSnippet = cleanSnippet(contrastingMsg.text, 80).toLowerCase();
-      derivedSummary = `Active deliberation with ${authorSummary} centers on ${mainTopic}. Discussion highlights key trade-offs, particularly regarding ${contrastSnippet}. The group is weighing practical next steps to reach consensus.`;
-    }
-
-    const derivedDisagreements: Array<{ id: string; sideA: { count: number; label: string }; sideB: { count: number; label: string } }> = [];
-    if (validHumanContributions.length >= 2) {
-      const side1Text = cleanSnippet(firstMsg.text, 45);
-      let side2Text = cleanSnippet(latestMsg.text, 45);
-      if (side1Text.toLowerCase() === side2Text.toLowerCase() && recentMsgs.length > 2) {
-        side2Text = cleanSnippet(recentMsgs[1].text, 45);
-      }
-      const half = Math.max(1, Math.floor(validHumanContributions.length / 2));
-      derivedDisagreements.push({
-        id: "live-d1",
-        sideA: { count: half, label: side1Text || "initial proposal" },
-        sideB: { count: Math.max(1, validHumanContributions.length - half), label: side2Text || "alternative viewpoint" },
-      });
-
-      if (validHumanContributions.length >= 4) {
-        const otherMsgs = recentMsgs.filter((m) => m !== firstMsg && m !== latestMsg);
-        if (otherMsgs.length >= 2) {
-          derivedDisagreements.push({
-            id: "live-d2",
-            sideA: { count: 1, label: cleanSnippet(otherMsgs[0].text, 40) },
-            sideB: { count: 1, label: cleanSnippet(otherMsgs[1].text, 40) },
-          });
-        }
-      }
-    }
-
-    const questions = recentMsgs.filter((m) => m.text.includes("?"));
-    const derivedMissingPieces: Array<{ id: string; description: string; action: string; actionLabel: string }> = [];
-    if (questions.length > 0) {
-      questions.slice(0, 2).forEach((q, idx) => {
-        const qText = q.text.replace(/[\n\r]+/g, " ").trim();
-        const firstQ = qText.split("?")[0] + "?";
-        derivedMissingPieces.push({
-          id: `live-mp-${idx}`,
-          description: cleanSnippet(firstQ, 90),
-          action: "request",
-          actionLabel: "Request info",
-        });
-      });
-    } else {
-      derivedMissingPieces.push({
-        id: "live-mp-0",
-        description: `Verification data for: ${cleanSnippet(latestMsg.text, 70)}`,
-        action: "request",
-        actionLabel: "Request data",
-      });
-    }
-
-    const actionCues = ["let's", "lets", "will", "need to", "should", "plan to", "todo", "action", "review", "schedule", "verify", "test", "build"];
-    const actionMsgs = recentMsgs.filter((m) => actionCues.some((c) => m.text.toLowerCase().includes(c)));
-    const derivedNextSteps: string[] = [];
-    if (actionMsgs.length > 0) {
-      actionMsgs.slice(0, 3).forEach((m) => {
-        derivedNextSteps.push(cleanSnippet(m.text, 80));
-      });
-    } else {
-      derivedNextSteps.push(`Finalize decision on ${cleanSnippet(firstMsg.text, 50).toLowerCase()}`);
-      if (validHumanContributions.length > 1) {
-        derivedNextSteps.push(`Address points raised by ${latestMsg.authorName}`);
-      }
-    }
-
+  // Render only what the AI synthesizer produced. Never fabricate insights from raw
+  // chat text on the client: quoting messages back reads as the AI echoing the room.
+  const { rawInsights, disagreementsList, missingPiecesList, nextSteps } = useMemo(() => {
+    const wire = intelligence as IntelligenceWire;
     return {
-      summary: derivedSummary,
-      disagreements: derivedDisagreements,
-      missingPieces: derivedMissingPieces,
-      nextSteps: derivedNextSteps,
-      raw_insights: [],
+      rawInsights: intelligence.raw_insights || [],
+      disagreementsList: intelligence.disagreements || [],
+      missingPiecesList: intelligence.missingPieces || wire.missing_pieces || [],
+      nextSteps: (intelligence.nextSteps || wire.next_steps || []).filter(
+        (step): step is string => typeof step === "string" && step.trim().length > 0
+      ),
     };
-  }, [validHumanContributions]);
+  }, [intelligence]);
 
-  const rawInsights = intelligence.raw_insights || [];
-  const effectiveSummary = useMemo(() => {
-    if (validHumanContributions.length === 0) return "";
-    if (isStaleDemo || !intelligence.summary || !intelligence.summary.trim()) {
-      return derivedIntelligence.summary;
-    }
-    return intelligence.summary;
-  }, [validHumanContributions.length, isStaleDemo, intelligence.summary, derivedIntelligence.summary]);
-
-  const summaryText = cleanLiveSummary(effectiveSummary);
-
-  const disagreementsList = useMemo(() => {
-    if (validHumanContributions.length === 0) return [];
-    if (isStaleDemo || !intelligence.disagreements || intelligence.disagreements.length === 0) {
-      return derivedIntelligence.disagreements;
-    }
-    return intelligence.disagreements;
-  }, [validHumanContributions.length, isStaleDemo, intelligence.disagreements, derivedIntelligence.disagreements]);
-
-  const missingPiecesList = useMemo(() => {
-    if (validHumanContributions.length === 0) return [];
-    const existing = intelligence.missingPieces || (intelligence as IntelligenceWire).missing_pieces;
-    if (isStaleDemo || !existing || existing.length === 0) {
-      return derivedIntelligence.missingPieces;
-    }
-    return existing;
-  }, [validHumanContributions.length, isStaleDemo, intelligence, derivedIntelligence.missingPieces]);
-
-  const nextSteps = useMemo(() => {
-    if (validHumanContributions.length === 0) return [];
-    const existing = (intelligence.nextSteps || (intelligence as IntelligenceWire).next_steps || []).filter(
-      (s) => typeof s === "string" && s.trim()
-    );
-    if (isStaleDemo || !existing || existing.length === 0) {
-      return derivedIntelligence.nextSteps;
-    }
-    return existing;
-  }, [validHumanContributions.length, isStaleDemo, intelligence, derivedIntelligence.nextSteps]);
+  const summaryText = cleanLiveSummary(intelligence.summary || "");
 
   const displayGraph = useMemo(() => {
     // If backend provided a knowledgeGraph without old claim nodes, prefer it
@@ -459,7 +310,7 @@ export function LiveIntelligencePanel({
     return { bubble_id: knowledgeGraph?.bubble_id || "local", nodes, edges, version: knowledgeGraph?.version || 0 };
   }, [bubbleTitle, disagreementsList, intelligence.summary, knowledgeGraph, missingPiecesList, nextSteps, rawInsights]);
   const hasContent = Boolean(
-    summaryText || disagreementsList.length || missingPiecesList.length || intelligence.nextSteps?.length || rawInsights.length
+    summaryText || disagreementsList.length || missingPiecesList.length || nextSteps.length || rawInsights.length
   );
 
   const [requestedToast, setRequestedToast] = useState<string | null>(null);
@@ -559,7 +410,9 @@ export function LiveIntelligencePanel({
                   overflow: "hidden",
                 }}
               >
-                {summaryText || "Waiting for contributions before generating a live summary."}
+                {summaryText || (hasHumanContributions
+                  ? "Bubble AI is analyzing the discussion. Insights appear a few seconds after new messages."
+                  : "Waiting for contributions before generating a live summary.")}
               </p>
               {summaryText.length > 320 && (
                 <button

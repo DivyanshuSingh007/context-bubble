@@ -13,6 +13,7 @@ import { getBubble, getKnowledgeGraph, subscribeToBubbleStream, getPopStatus, jo
 import { getAvatarUrl, getSavedAvatarProfile } from "@/lib/avatar-profile";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DecisionRecordDownloads } from "@/components/bubble/DecisionRecordDownloads";
 
 interface Props {
   initialBubble: Bubble;
@@ -82,7 +83,6 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
   // Popped / Executive Briefing Modal State
   const [showBriefingModal, setShowBriefingModal] = useState<boolean>(false);
   const briefingModalStartedRef = useRef(false);
-  const briefingRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [briefing, setBriefing] = useState<ExecutiveBriefing | null>(null);
   const [copiedBriefing, setCopiedBriefing] = useState<boolean>(false);
 
@@ -316,7 +316,8 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
     };
   }, [bubble.id, bubble.popState, isSynthesizing]);
 
-  // When bubble is popped: fetch real briefing, show modal briefly, then redirect
+  // When bubble is popped: fetch the real briefing and keep it open until the host closes it,
+  // so the decision record can be read and downloaded.
   const loadBriefingModal = useCallback(async () => {
     if (briefingModalStartedRef.current) return;
     briefingModalStartedRef.current = true;
@@ -330,18 +331,10 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
       // Non-fatal — we'll still redirect
     }
     setShowBriefingModal(true);
-
-    // After 8 seconds redirect to home — session is over
-    briefingRedirectTimerRef.current = setTimeout(() => {
-      router.push(`/?popped=${encodeURIComponent(bubble.title)}`);
-    }, 8000);
-  }, [bubble.id, bubble.title, router]);
+  }, [bubble.id]);
 
   useEffect(() => {
     briefingModalStartedRef.current = false;
-    return () => {
-      if (briefingRedirectTimerRef.current) clearTimeout(briefingRedirectTimerRef.current);
-    };
   }, [bubble.id, readOnly]);
 
   useEffect(() => {
@@ -923,18 +916,17 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
                   <p className="text-slate-400 text-xs">Generated upon session pop and exported to destinations</p>
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-1">
-                <button
-                  onClick={() => {
-                    setShowBriefingModal(false);
-                    router.push("/");
-                  }}
-                  className="text-slate-400 hover:text-white text-sm"
-                >
-                  ✕
-                </button>
-                <span className="text-[10px] text-slate-500 animate-pulse">Redirecting to home…</span>
-              </div>
+              <button
+                type="button"
+                aria-label="Close and go home"
+                onClick={() => {
+                  setShowBriefingModal(false);
+                  router.push("/");
+                }}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
             </div>
 
             {/* Summary — real data from backend */}
@@ -1076,11 +1068,12 @@ export function BubblePage({ initialBubble, initialRole, initialUserName, joinCo
 
 
             {/* Actions */}
-            <div className="flex items-center justify-between pt-3 border-t border-white/10">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/10">
               <span className="text-xs text-slate-500">
-                Cryptographically shredded &amp; exported
+                Also available later in My Bubbles if shared
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {briefing && <DecisionRecordDownloads bubbleId={bubble.id} briefing={briefing} />}
                 {briefing?.markdown_content && (
                   <button
                     onClick={handleCopyBriefingMarkdown}
